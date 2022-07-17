@@ -1,0 +1,51 @@
+CMAKE_MINIMUM_REQUIRED(VERSION 3.18)
+
+PROJECT(PRT)
+
+SET(TargetName PRT)
+
+FILE(GLOB_RECURSE CPP_SRC
+        "${PROJECT_SOURCE_DIR}/*.h"
+        "${PROJECT_SOURCE_DIR}/*.cpp")
+
+FILE(GLOB_RECURSE HLSL_SRC
+        "${PROJECT_ASSET_DIR}/00/*.hlsl")
+
+# SET(OpenCV_DIR "../../include/opencv/build")
+# FIND_PACKAGE(OpenCV REQUIRED)
+# INCLUDE_DIRECTORIES(${OpenCV_INCLUDE_DIRS})
+
+
+ADD_EXECUTABLE(${TargetName} ${CPP_SRC} ${HLSL_SRC})
+
+TARGET_INCLUDE_DIRECTORIES(${TargetName} PUBLIC
+        "${ROOT_DIR}/include/opencv/build/include"
+        )
+
+# SET_PROPERTY(SOURCE ${HLSL_SRC} PROPERTY VS_SETTINGS "ExcludedFromBuild=true")
+
+SOURCE_GROUP("Sources" FILES ${CPP_SRC})
+SOURCE_GROUP("Shaders" FILES ${HLSL_SRC})
+
+SET_PROPERTY(TARGET ${TargetName} PROPERTY CXX_STANDARD 20)
+SET_PROPERTY(TARGET ${TargetName} PROPERTY CXX_STANDARD_REQUIRED ON)
+
+IF(MSVC)
+    SET_PROPERTY(
+            TARGET ${TargetName}
+            PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/")
+ENDIF()
+
+
+TARGET_LINK_LIBRARIES(${TargetName} PUBLIC AGZUtils m_common assimp-vc142-mtd.lib)
+
+set(ADDITIONAL_LIBRARY_DEPENDENCIES
+        "$<$<CONFIG:Debug>:"
+        "opencv_world3410d"
+        ">"
+        "$<$<CONFIG:Release>:"
+        "opencv_world3410"
+        ">")
+
+TARGET_LINK_LIBRARIES(${TargetName} PRIVATE
+        "${ADDITIONAL_LIBRARY_DEPENDENCIES}")
