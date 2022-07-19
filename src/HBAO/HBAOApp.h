@@ -8,11 +8,11 @@
 #include <m_common/m_FrameBuffer.h>
 
 #include "GBufferPass.h"
-#include "SSAOCalculationPass.h"
+#include "HBAOCalculationPass.h"
 #include "SSAOApplyPass.h"
 #include "SSDOCalculationPass.h"
 
-class SSDOApp : public Demo
+class HBAOApp : public Demo
 {
 public :
     using Demo::Demo;
@@ -53,12 +53,12 @@ private:
 
     bool bUseSSAO = true;
     GBufferPass gbuffer_pass;
-    SSAOCalculationPass ssao_calculation_pass;
+    HBAOCalculationPass hbao_calculation_pass;
     SSAOApplyPass ssao_apply_pass;
     SSDOCalculationPass ssdo_calculation_pass;
 };
 
-void SSDOApp::initialize()
+void HBAOApp::initialize()
 {
     this->m_models.emplace_back("../../../asset/mary/mary.obj");
 
@@ -97,7 +97,7 @@ void SSDOApp::initialize()
     ssdo_calculation_pass.InitPass();
 }
 
-void SSDOApp::frame()
+void HBAOApp::frame()
 {
     // window events
 
@@ -127,12 +127,12 @@ void SSDOApp::frame()
     ImGui::End();
 }
 
-void SSDOApp::destroy()
+void HBAOApp::destroy()
 {
 
 }
 
-void SSDOApp::updateCamera() {
+void HBAOApp::updateCamera() {
     m_camera.setWOverH(window_->get_framebuffer_w_over_h());
     if(!mouse_->is_cursor_visible())
     {
@@ -150,7 +150,7 @@ void SSDOApp::updateCamera() {
     m_camera.recalculateMatrics();
 }
 
-Light SSDOApp::getLight()
+Light HBAOApp::getLight()
 {
     glm::vec3 light_pos = glm::vec3(10, 10, 10);
     glm::vec3 light_ambient(0.05, 0.05, 0.05);
@@ -173,7 +173,7 @@ Light SSDOApp::getLight()
     };
 }
 
-void SSDOApp::frameSSAO()
+void HBAOApp::frameSSAO()
 {
 
     auto model = glm::identity<glm::mat4>();
