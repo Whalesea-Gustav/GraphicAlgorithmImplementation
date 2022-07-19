@@ -9,7 +9,7 @@
 
 #include "GBufferPass.h"
 #include "HBAOCalculationPass.h"
-#include "SSAOApplyPass.h"
+#include "HBAORenderPass.h"
 #include "SSDOCalculationPass.h"
 
 class HBAOApp : public Demo
@@ -51,11 +51,13 @@ private:
     float lastX;
     float lastY;
 
-    bool bUseSSAO = true;
+    bool bUseHBAO = true;
+    bool bUseLight = true;
+
     GBufferPass gbuffer_pass;
     HBAOCalculationPass hbao_calculation_pass;
-    SSAOApplyPass ssao_apply_pass;
-    SSDOCalculationPass ssdo_calculation_pass;
+    HBAORenderPass hbao_render_pass;
+
 };
 
 void HBAOApp::initialize()
@@ -84,17 +86,13 @@ void HBAOApp::initialize()
 
     gbuffer_pass.setWH(window_->get_framebuffer_width(), window_->get_framebuffer_height());
     gbuffer_pass.setModel(p_marry_model);
-    gbuffer_pass.initV();
+    gbuffer_pass.InitPass();
 
-    ssao_calculation_pass.setWH(window_->get_framebuffer_width(), window_->get_framebuffer_height());
-    ssao_calculation_pass.initV();
+    hbao_calculation_pass.setWH(window_->get_framebuffer_width(), window_->get_framebuffer_height());
+    hbao_calculation_pass.InitPass();
 
-    ssao_apply_pass.setWH(window_->get_framebuffer_width(), window_->get_framebuffer_height());
-    ssao_apply_pass.initV();
-
-    ssdo_calculation_pass.setWH(window_->get_framebuffer_width(), window_->get_framebuffer_height());
-
-    ssdo_calculation_pass.InitPass();
+    hbao_render_pass.setWH(window_->get_framebuffer_width(), window_->get_framebuffer_height());
+    hbao_render_pass.InitPass();
 }
 
 void HBAOApp::frame()
@@ -115,8 +113,10 @@ void HBAOApp::frame()
     bool gui = ImGui::Begin("Settings", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
     if(gui)
     {
-        ImGui::Text("SSAO Effect Checkbox");
-        ImGui::Checkbox("SSAO ON", &bUseSSAO);
+        ImGui::Text("HBAO Effect Checkbox");
+        ImGui::Checkbox("HBAO ON", &bUseHBAO);
+        ImGui::Text("Blinn Phong Checkbox");
+        ImGui::Checkbox("Blinn Phong Light ON", &bUseLight);
     }
 
     //update camera
@@ -181,48 +181,25 @@ void HBAOApp::frameSSAO()
     auto projection = m_camera.getProj();
 
     //Gbuffer pass
-    auto p_gbuffer_shader = gbuffer_pass.getShader();
+    auto p_gbuffer_shader = gbuffer_pass.GetShader();
     p_gbuffer_shader->use();
     p_gbuffer_shader->setMat4("model", model);
     p_gbuffer_shader->setMat4("view", view);
     p_gbuffer_shader->setMat4("projection", projection);
-    gbuffer_pass.updateV();
+    gbuffer_pass.RenderPass();
 
     //SSAO calculation pass
-    auto p_ssao_calculation_shader = ssao_calculation_pass.getShader();
-    p_ssao_calculation_shader->use();
+    auto p_hbao_calculation_shader = hbao_calculation_pass.GetShader();
+    p_hbao_calculation_shader->use();
     glActiveTexture(GL_TEXTURE3);
-    glBindTexture(GL_TEXTURE_2D, gbuffer_pass.gPositionDepth);
-    glActiveTexture(GL_TEXTURE4);
-    glBindTexture(GL_TEXTURE_2D, gbuffer_pass.gNormal);
-    p_ssao_calculation_shader->setInt("gPositionDepth", 3);
-    p_ssao_calculation_shader->setInt("gNormal", 4);
-    p_ssao_calculation_shader->setMat4("projection", projection);
-    ssao_calculation_pass.updateV();
+    glBindTexture(GL_TEXTURE_2D, gbuffer_pass.gDepthTexture);
+    p_hbao_calculation_shader->setInt("u_DepthTexture", 3);
+    hbao_calculation_pass.RenderPass();
 
-    //SSDO calculation pass
-    auto p_ssdo_calculation_shader = ssdo_calculation_pass.GetShader();
-    p_ssdo_calculation_shader->use();
-
-
-    glActiveTexture(GL_TEXTURE3);
-    glBindTexture(GL_TEXTURE_2D, gbuffer_pass.gPositionDepth);
-    glActiveTexture(GL_TEXTURE4);
-    glBindTexture(GL_TEXTURE_2D, gbuffer_pass.gNormal);
-    glActiveTexture(GL_TEXTURE5);
-    glBindTexture(GL_TEXTURE_2D, gbuffer_pass.gAlbedo);
-    glActiveTexture(GL_TEXTURE9);
-    glBindTexture(GL_TEXTURE_2D, ssao_calculation_pass.noiseTexture);
-    p_ssdo_calculation_shader->setInt("gPositionDepth", 3);
-    p_ssdo_calculation_shader->setInt("gNormal", 4);
-    p_ssdo_calculation_shader->setInt("gAlbedo", 5);
-    p_ssdo_calculation_shader->setMat4("projection", projection);
-    p_ssdo_calculation_shader->setInt("texNoise", 9);
-    ssdo_calculation_pass.RenderPass();
 
     //Apply SSAO results to GBuffers;
-    auto p_apply_ssao_shader = ssao_apply_pass.getShader();
-    p_apply_ssao_shader->use();
+    auto p_hbao_render_shader = hbao_render_pass.GetShader();
+    p_hbao_render_shader->use();
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, gbuffer_pass.gPositionDepth);
     glActiveTexture(GL_TEXTURE1);
@@ -230,20 +207,19 @@ void HBAOApp::frameSSAO()
     glActiveTexture(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_2D, gbuffer_pass.gAlbedo);
     glActiveTexture(GL_TEXTURE3);
-    glBindTexture(GL_TEXTURE_2D, ssao_calculation_pass.m_Blur_Buffer);
+    glBindTexture(GL_TEXTURE_2D, hbao_calculation_pass.m_Blur_Buffer);
 
-    p_apply_ssao_shader->setInt("gPositionDepth", 0);
-    p_apply_ssao_shader->setInt("gNormal", 1);
-    p_apply_ssao_shader->setInt("gAlbedo", 2);
-    p_apply_ssao_shader->setInt("ssao", 3);
-    p_apply_ssao_shader->setVec3("light.Position", m_lights[0].position);
-    p_apply_ssao_shader->setVec3("light.Color", m_lights[0].specular);
-    p_apply_ssao_shader->setFloat("light.Linear", m_lights[0].linear);
-    p_apply_ssao_shader->setFloat("light. Quadratic", m_lights[0].quadratic);
-    p_apply_ssao_shader->setBool("bUseSSAO", bUseSSAO);
+    p_hbao_render_shader->setInt("gPositionDepth", 0);
+    p_hbao_render_shader->setInt("gNormal", 1);
+    p_hbao_render_shader->setInt("gAlbedo", 2);
+    p_hbao_render_shader->setInt("hbao", 3);
+    p_hbao_render_shader->setVec3("light.Position", m_lights[0].position);
+    p_hbao_render_shader->setVec3("light.Color", m_lights[0].specular);
+    p_hbao_render_shader->setFloat("light.Linear", m_lights[0].linear);
+    p_hbao_render_shader->setFloat("light. Quadratic", m_lights[0].quadratic);
+    p_hbao_render_shader->setBool("bUseHBAO", bUseHBAO);
+    p_hbao_render_shader->setBool("bUseLight", bUseLight);
 
-    ssao_apply_pass.updateV();
-
-
+    hbao_render_pass.RenderPass();
 }
 

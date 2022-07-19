@@ -21,7 +21,7 @@ int main()
         .title = "test viewer",
         .multisamples = 4
     };
-    SSDOApp test(windowDesc);
+    HBAOApp test(windowDesc);
     test.run();
 }
 

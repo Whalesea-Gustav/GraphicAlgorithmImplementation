@@ -4,10 +4,10 @@
 #include <random>
 #include <m_common/m_ExamplesVAO.h>
 
-class SSAOApplyPass : public RenderPass
+class HBAORenderPass : public RenderPassV2
 {
 public:
-    using RenderPass::RenderPass;
+    using RenderPassV2::RenderPassV2;
 
     void setWH(int width, int height)
     {
@@ -15,16 +15,16 @@ public:
         this->m_height = height;
     }
 
-    virtual void initV()
+    virtual void InitPass()
     {
         //Init Shader;
-        m_pShader = std::make_shared<Shader>("../../../asset/SSAO/ApplySSAO_vs.glsl",
-                                             "../../../asset/SSAO/ApplySSAO_fs.glsl");
+        m_pShader = std::make_shared<Shader>("../../../asset/HBAO/HBAO_Render_vs.glsl",
+                                             "../../../asset/HBAO/HBAO_Render_fs.glsl");
 
     }
 
 
-    virtual void updateV()
+    virtual void RenderPass()
     {
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -38,7 +38,7 @@ public:
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
     }
 
-    virtual ~SSAOApplyPass()
+    virtual ~HBAORenderPass()
     {
     }
 public:

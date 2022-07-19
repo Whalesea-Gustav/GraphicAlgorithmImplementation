@@ -134,3 +134,7 @@ glm::vec3 m_Camera::computeDirection() const
             std::sin(horiRad_) * std::cos(vertRad_)
     };
 }
+
+float m_Camera::getFovDegree() const noexcept {
+    return fovDeg_;
+}

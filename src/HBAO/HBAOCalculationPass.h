@@ -91,15 +91,16 @@ public:
         glBindTexture(GL_TEXTURE_2D, noiseTexture);
         m_pShader->setInt("u_NoiseTexture", 9);
 
-        m_pShader->setFloat("u_WindowWidth", m_width);
-        m_pShader->setFloat("u_WindowHeight", m_height);
-        m_pShader->setFloat("u_Near", ElayGraphics::Camera::getMainCameraNear());
-        m_pShader->setFloat("u_Fov", glm::radians(ElayGraphics::Camera::getMainCameraFov()));
-        m_pShader->setFloat("u_Far", ElayGraphics::Camera::getMainCameraFar());
-        m_pShader->setFloat("u_FocalLen", FocalLen.x, FocalLen.y);
-        m_pShader->setTexture("u_DepthTexture", ElayGraphics::ResourceManager::getSharedDataByName<std::shared_ptr<ElayGraphics::STexture>>("DepthTexture"));
-        m_pShader->setTexture("u_NoiseTexture", TextureConfigNoise);
-
+        m_pShader->setFloat("u_WindowWidth", static_cast<float>(m_width));
+        m_pShader->setFloat("u_WindowHeight", static_cast<float>(m_height));
+        m_pShader->setFloat("u_Near", zNear);
+        m_pShader->setFloat("u_Far", zFar);
+        m_pShader->setFloat("u_Fov", glm::radians(fov));
+        glm::vec2 FocalLen;
+        float fovRad = glm::radians(fov);
+        FocalLen[0] = 1.0f / tanf(fovRad * 0.5f) * (static_cast<float>(m_height) / static_cast<float>(m_width));
+        FocalLen[1] = 1.0f / tanf(fovRad * 0.5f);
+        m_pShader->setVec2("u_FocalLen", FocalLen);
 
 
         // Blur Operation
@@ -139,7 +140,7 @@ public:
         m_pBlurShader->use();
         glActiveTexture(GL_TEXTURE6);
         glBindTexture(GL_TEXTURE_2D, m_HBAO_Color_Buffer);
-        m_pBlurShader->setInt("ssaoInput", 6);
+        m_pBlurShader->setInt("hbaoInput", 6);
         ExamplesVAO::renderQuad();
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
     }
@@ -148,6 +149,10 @@ public:
     {
     }
 public:
+
+    //Camera Info
+    float zNear = 0.1f, zFar = 100.0f, fov = 60.0f;
+
     unsigned int m_HBAO_FBO;
     unsigned int m_HBAO_Color_Buffer;
     unsigned int rboDepth;

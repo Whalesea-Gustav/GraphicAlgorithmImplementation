@@ -49,6 +49,8 @@ public:
 
     float getFarZ() const noexcept;
 
+    float getFovDegree() const noexcept;
+
     const glm::vec3 &getPosition() const noexcept;
 
     glm::vec2 getDirection() const noexcept;
