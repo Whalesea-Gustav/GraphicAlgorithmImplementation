@@ -21,12 +21,10 @@ int main()
         .title = "test viewer",
         .multisamples = 4
     };
+    //largely reuse HBAO code, but only the HBAO shader is replaced by GTAO shader
     HBAOApp test(windowDesc);
     test.run();
 }
-
-//Todo:
-//
 
 
 
