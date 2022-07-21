@@ -1,6 +1,7 @@
 #version 430 core
 
 const float PI = 3.14159265;
+const float PI_HALF = 1.5708;
 
 uniform sampler2D u_DepthTexture; //只要深度信息就可以恢复出各种信息 -> Depth To Position And Normal
 uniform sampler2D u_NoiseTexture;
@@ -69,6 +70,7 @@ float BiasedTangent(vec3 V)
     return V.z * InvLength(V.xy) + TanBias;
 }
 
+
 float Tangent(vec3 P, vec3 S)
 {
     return Tangent(S - P);
@@ -130,6 +132,88 @@ float numSamples)
     return ao;
 }
 
+float IntegrateArc(float h1, float h2, float n)
+{
+    float ao = 0.0;
+    vec2 h = vec2(h1, h2);
+    vec2 Arc = -cos(2 * h - n) + cos(n) + 2 * h * sin(n);
+
+    return 0.25 * (Arc.x + Arc.y);
+}
+
+float GroundTruthAmbientOcclusion(vec2 deltaUV,
+vec3 P,
+vec3 viewNormal,
+vec3 dPdu,
+vec3 dPdv,
+float randstep,
+float numSamples)
+{
+    float ao = 0;
+    vec2 uv = TexCoord + SnapUVOffset(randstep*deltaUV);
+    deltaUV = SnapUVOffset(deltaUV);
+    vec3 T = deltaUV.x * dPdu + deltaUV.y * dPdv;
+    float tanH = BiasedTangent(T);
+    float sinH = TanToSin(tanH);
+    float tanS;
+    float d2;
+    vec3 S;
+
+    vec3 viewDir = normalize(0 - P);
+
+    float cosMax = 0;
+    for(float s = 1; s <= numSamples; ++s)
+    {
+        uv += deltaUV;
+        S = GetViewPos(uv);
+        vec3 ds = S - P;
+        float cos = dot(normalize(ds),viewDir);
+
+        if (cos > cosMax)
+        {
+            cosMax = cos;
+        }
+    }
+
+    float h1 = clamp(acos(cosMax), -1, 1);
+
+    uv = TexCoord - SnapUVOffset(randstep*deltaUV);
+    deltaUV = SnapUVOffset(deltaUV);
+
+    cosMax = 0;
+    for (float s = 1; s <= numSamples; ++s)
+    {
+        uv -= deltaUV;
+        S = GetViewPos(uv);
+        vec3 ds = S - P;
+        float cos = dot(normalize(ds),viewDir);
+
+        if (cos > cosMax)
+        {
+            cosMax = cos;
+        }
+    }
+
+    float h2 = clamp(acos(cosMax), -1, 1);
+
+    //calculate projected normal
+    vec3 sliceDir = vec3(deltaUV, 0.0);
+
+    vec3 planeNormal = normalize(cross(sliceDir, viewDir));
+    vec3 projectedNormal = viewNormal - planeNormal * dot(viewNormal, planeNormal);
+    float cos_n = clamp(dot(normalize(projectedNormal), viewNormal), -1, 1);
+    float n = acos(cos_n);
+
+    h1 = n + max(-h1-n, -PI_HALF);
+    h2 = n + max(h2 - n, PI_HALF);
+
+    ao = IntegrateArc(h1, h2, n);
+
+    return ao;
+}
+
+
+
 vec2 RotateDirections(vec2 Dir, vec2 CosSin)
 {
     return vec2(Dir.x*CosSin.x - Dir.y*CosSin.y,
@@ -164,8 +248,12 @@ void main(void)
     Pl 	= GetViewPos(TexCoord + vec2(-1.0 / u_WindowWidth, 0));
     Pt 	= GetViewPos(TexCoord + vec2( 0, 1.0 / u_WindowHeight));
     Pb 	= GetViewPos(TexCoord + vec2( 0,-1.0 / u_WindowHeight));
-    vec3 dPdu = MinDiff(P, Pr, Pl);
-    vec3 dPdv = MinDiff(P, Pt, Pb) * (u_WindowHeight * 1.0 / u_WindowWidth);
+    vec3 dPdu = MinDiff(P, Pr, Pl); //leftDir
+    vec3 dPdv = MinDiff(P, Pt, Pb) * (u_WindowHeight * 1.0 / u_WindowWidth); //upDir
+
+    vec3 viewNormal = normalize(cross(dPdu, dPdv));
+
+
     vec3 random = texture(u_NoiseTexture, TexCoord.xy * NoiseScale).rgb;
     vec2 rayRadiusUV = 0.5 * R * u_FocalLen / -P.z;
     float rayRadiusPix = rayRadiusUV.x * u_WindowWidth;
@@ -183,9 +271,9 @@ void main(void)
             //积化和差 -> (cos(theta+random), sin(theta+random))
             vec2 dir = RotateDirections(vec2(cos(theta), sin(theta)), random.xy);
             vec2 deltaUV = dir * stepSizeUV;
-            ao += HorizonOcclusion(deltaUV,P,dPdu,dPdv,random.z,numSteps);
+            ao += GroundTruthAmbientOcclusion(deltaUV,P, viewNormal,dPdu,dPdv,random.z,numSteps);
         }
-        ao = 1.0 - ao / numDirections * u_AOStrength;
     }
+    ao /= 10.0f; // for visualization
     Color_ = ao;
 }
