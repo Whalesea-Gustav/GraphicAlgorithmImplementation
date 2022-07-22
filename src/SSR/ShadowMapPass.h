@@ -1,6 +1,7 @@
 #pragma once
 #include <m_common/m_RenderPass.h>
 #include <m_common/m_Model.h>
+#include <m_common/m_Model_v2.h>
 #include <random>
 #include <m_common/m_ExamplesVAO.h>
 #include <glm/gtc/random.hpp>
@@ -16,9 +17,9 @@ public:
         this->m_height = height;
     }
 
-    void setModel(std::shared_ptr<Model<VertexPosNormalTex>> pModel)
+    void setModel(std::shared_ptr<Modelv2<VertexPosNormalTexTanBitan>> pModelv2)
     {
-        this->m_pModel = pModel;
+        this->m_pModelv2 = pModelv2;
     }
 
     virtual void InitPass()
@@ -64,7 +65,7 @@ public:
         glViewport(0, 0, m_width, m_height);
         m_pShader->use();
 
-        m_pModel->Draw(*m_pShader);
+        m_pModelv2->Draw(*m_pShader);
 
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
@@ -79,7 +80,8 @@ public:
     unsigned int m_shadowmap_FBO;
     unsigned int depthTexture;
 
-    std::shared_ptr<Model<VertexPosNormalTex>> m_pModel;
+    std::shared_ptr<Modelv2<VertexPosNormalTexTanBitan>> m_pModelv2;
+
     int m_width;
     int m_height;
 

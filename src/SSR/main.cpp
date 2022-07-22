@@ -8,7 +8,7 @@
 #endif
 
 #include <agz-utils/graphics_api.h>
-#include  "PCFApp.h"
+#include  "SSRApp.h"
 
 
 using namespace agz::gl;
@@ -17,11 +17,11 @@ using namespace agz::gl;
 int main()
 {
     window_desc_t windowDesc {
-        .size = {2400, 1680},
+        .size = {1200, 900},
         .title = "test viewer",
         .multisamples = 4
     };
-    PCFApp test(windowDesc);
+    SSRApp test(windowDesc);
     test.run();
 }
 

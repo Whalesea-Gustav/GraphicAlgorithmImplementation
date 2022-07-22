@@ -3,12 +3,16 @@
 
 #include <m_common/m_Vertex.h>
 #include <m_common/m_Model.h>
+#include <m_common/m_Model_v2.h>
 #include <m_common/m_CameraV2.h>
 #include <m_common/m_Light.h>
 #include <m_common/m_FrameBuffer.h>
 
+#include "ShadowMapPass.h"
+#include "GBufferPass.h"
 
-class PCFApp : public Demo
+
+class SSRApp : public Demo
 {
 public :
     using Demo::Demo;
@@ -20,7 +24,9 @@ protected:
 
     void destroy() override;
 
-    void framePCF();
+    void frameSSR();
+
+    unsigned int loadTexture(const char *path);
 
 private:
 
@@ -29,6 +35,9 @@ private:
     Light getLight();
 
     std::vector<Model<VertexPosNormalTex>> m_models;
+
+    std::shared_ptr<Modelv2<VertexPosNormalTexTanBitan>> m_pModelv2;
+    unsigned AlbedoMap, NormalMap;
 
     std::vector<Shader> m_shaders;
 
@@ -45,20 +54,20 @@ private:
     float lastX;
     float lastY;
 
+    ShadowMapPass shadowmap_pass;
+    GBufferPass gbuffer_pass;
 };
 
-void PCFApp::initialize()
+void SSRApp::initialize()
 {
-    this->m_models.emplace_back("../../../asset/mary/mary.obj");
-    this->m_models.emplace_back("../../../asset/Geometry/ground.obj");
+    //this->m_models.emplace_back("../../../asset/Cave/cave.obj");
 
-    this->m_shaders.emplace_back("../../../asset/ModelDraw/model_loading_vs.glsl", "../../../asset/ModelDraw/model_loading_fs.glsl");
-    this->m_shaders.emplace_back("../../../asset/PhongLighting/PhongLighting_vs.glsl", "../../../asset/PhongLighting/PhongLighting_fs.glsl");
-    this->m_shaders.emplace_back("../../../asset/DepthMap/LightPass_vs.glsl", "../../../asset/DepthMap/LightPass_fs.glsl");
-    this->m_shaders.emplace_back("../../../asset/PCF/PCF_vs.glsl", "../../../asset/PCF/PCF_fs.glsl");
-
+    auto pModelv2 = std::make_shared<Modelv2<VertexPosNormalTexTanBitan>>("../../../asset/Cave/cave.obj", false, true);
+    m_pModelv2 = pModelv2;
     this->m_lights.push_back(getLight());
 
+    AlbedoMap = loadTexture("../../../asset/Cave/albedo.jpg");
+    NormalMap = loadTexture("../../../asset/Cave/normal.jpg");
 
     m_camera.setPosition({ 0, 2, 3 });
     m_camera.setDirection(-3.14159f * 0.5f, 0);
@@ -68,16 +77,17 @@ void PCFApp::initialize()
     this->mouse_->show_cursor(false);
     window_->do_events();
 
-    fbo_ptr = FrameBuffer::Create();
-    SHADOW_WIDTH = 2048;
-    SHADOW_HEIGHT = 2048;
-    //fbo_ptr->GenerateTexture2DAttachment(SHADOW_WIDTH, SHADOW_HEIGHT, GL_DEPTH_COMPONENT, GL_FLOAT, GL_DEPTH_ATTACHMENT);
-    fbo_ptr->GenerateShadowMap(SHADOW_WIDTH, SHADOW_HEIGHT,
-                               GL_DEPTH_COMPONENT, GL_DEPTH_COMPONENT, GL_FLOAT, GL_DEPTH_ATTACHMENT,
-                               true);
+    shadowmap_pass.setModel(pModelv2);
+    shadowmap_pass.setWH(window_->get_framebuffer_width(), window_->get_framebuffer_height());
+    shadowmap_pass.InitPass();
+
+    gbuffer_pass.setModel(pModelv2);
+    gbuffer_pass.setWH(window_->get_framebuffer_width(), window_->get_framebuffer_height());
+    gbuffer_pass.InitPass();
+
 }
 
-void PCFApp::frame()
+void SSRApp::frame()
 {
     // window events
 
@@ -95,15 +105,15 @@ void PCFApp::frame()
     //update camera
     updateCamera();
 
-    framePCF();
+    frameSSR();
 }
 
-void PCFApp::destroy()
+void SSRApp::destroy()
 {
 
 }
 
-void PCFApp::updateCamera() {
+void SSRApp::updateCamera() {
     m_camera.setWOverH(window_->get_framebuffer_w_over_h());
     if(!mouse_->is_cursor_visible())
     {
@@ -121,9 +131,9 @@ void PCFApp::updateCamera() {
     m_camera.recalculateMatrics();
 }
 
-Light PCFApp::getLight()
+Light SSRApp::getLight()
 {
-    glm::vec3 light_pos = glm::vec3(10, 10, 10);
+    glm::vec3 light_pos = glm::vec3(2, 7, 2);
     glm::vec3 light_ambient(0.05, 0.05, 0.05);
     glm::vec3 light_diffuse(1.0, 1.0, 1.0);
     glm::vec3 light_specular(1.0, 1.0, 1.0);
@@ -144,73 +154,80 @@ Light PCFApp::getLight()
     };
 }
 
-void PCFApp::framePCF()
+void SSRApp::frameSSR()
 {
     //Todo:
-    // 1. Generate Depthmap
+
+    // 1. ShadowMap Pass
 
     auto& light = m_lights[0];
-
-    // Light Pass
-    glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
-    fbo_ptr->Bind();
-
-    glClear(GL_DEPTH_BUFFER_BIT);
 
     glm::mat4 lightProjection = glm::ortho(-10.0f, 10.0f, -10.0f, 10.0f, m_camera.getNearZ(), m_camera.getFarZ());
     glm::mat4 lightView = glm::lookAt(light.position, glm::vec3(0, 1, 0), glm::vec3(0, 1, 0));
     glm::mat4 lightSpaceMatrix = lightProjection * lightView;
 
-    m_shaders[2].use();
-    m_shaders[2].setMat4("lightSpaceMatrix", lightSpaceMatrix);
-    m_shaders[2].setMat4("model", glm::identity<glm::mat4>());
-
-    m_models[0].Draw(m_shaders[2]);
-    m_models[1].Draw(m_shaders[2]);
-
-    fbo_ptr->UnBind();
-
-
-    // Object Pass
-    glViewport(0, 0, window_->get_framebuffer_width(), window_->get_framebuffer_height());
-
-    glEnable(GL_DEPTH_TEST);
-    glDepthFunc(GL_LESS);
-
-    glClearColor(0.05f, 0.05f, 0.05f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-    m_shaders[3].use();
     auto model = glm::identity<glm::mat4>();
     auto view = m_camera.getView();
     auto projection = m_camera.getProj();
 
-    m_shaders[3].setMat4("model", model);
-    m_shaders[3].setMat4("view", view);
-    m_shaders[3].setMat4("projection", projection);
-    m_shaders[3].setMat4("lightSpaceMatrix", lightSpaceMatrix);
+    auto p_shadowmap_shader = shadowmap_pass.GetShader();
 
-    //Light Info
-    m_shaders[3].setVec3("light.position", light.position);
-    m_shaders[3].setVec3("light.ambient", light.ambient);
-    m_shaders[3].setVec3("light.diffuse", light.diffuse);
-    m_shaders[3].setVec3("light.specular", light.specular);
-    m_shaders[3].setFloat("light.constant", light.constant);
-    m_shaders[3].setFloat("light.linear", light.linear);
-    m_shaders[3].setFloat("light.quadratic", light.quadratic);
-    m_shaders[3].setFloat("shininess", 32.0f);
-    m_shaders[3].setVec3("viewPos", m_camera.getPosition());
-    m_shaders[3].setBool("blinn", true);
-    m_shaders[3].setInt("shadowMap", 1);
+    p_shadowmap_shader->use();
 
-    glActiveTexture(GL_TEXTURE0+1);
-    glBindTexture(GL_TEXTURE_2D, fbo_ptr->GetTextureAttachment()[0]);
+    p_shadowmap_shader->setMat4("model", model);
+    p_shadowmap_shader->setMat4("lightSpaceMatrix", lightSpaceMatrix);
 
-    //PCF sampling radius
-    m_shaders[3].setInt("sampleRadius", 10);
+    shadowmap_pass.RenderPass();
 
-    m_models[0].Draw(m_shaders[3]);
-    m_models[1].Draw(m_shaders[3]);
+    // 2. Gbuffer Pass
+
+    auto p_gbuffer_shader = gbuffer_pass.GetShader();
+    p_gbuffer_shader->use();
+    p_gbuffer_shader->setMat4("model", model);
+    p_gbuffer_shader->setMat4("view", view);
+    p_gbuffer_shader->setMat4("projection", projection);
+
+    p_gbuffer_shader->setInt("AlbedoMap", AlbedoMap);
+    p_gbuffer_shader->setInt("NormalMap", NormalMap);
+
+    gbuffer_pass.RenderPass();
+
 
 }
 
+unsigned int SSRApp::loadTexture(const char *path)
+{
+    unsigned int textureID;
+    glGenTextures(1, &textureID);
+
+    int width, height, nrComponents;
+    unsigned char *data = stbi_load(path, &width, &height, &nrComponents, 0);
+    if (data)
+    {
+        GLenum format;
+        if (nrComponents == 1)
+            format = GL_RED;
+        else if (nrComponents == 3)
+            format = GL_RGB;
+        else if (nrComponents == 4)
+            format = GL_RGBA;
+
+        glBindTexture(GL_TEXTURE_2D, textureID);
+        glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
+        glGenerateMipmap(GL_TEXTURE_2D);
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+        stbi_image_free(data);
+    }
+    else
+    {
+        std::cout << "Texture failed to load at path: " << path << std::endl;
+        stbi_image_free(data);
+    }
+
+    return textureID;
+}
