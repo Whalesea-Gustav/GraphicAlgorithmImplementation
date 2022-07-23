@@ -10,7 +10,7 @@
 
 #include "ShadowMapPass.h"
 #include "GBufferPass.h"
-
+#include "MipmapPass.h"
 
 class SSRApp : public Demo
 {
@@ -56,11 +56,14 @@ private:
 
     ShadowMapPass shadowmap_pass;
     GBufferPass gbuffer_pass;
+    MipmapComputePass mipmap_pass;
 };
 
 void SSRApp::initialize()
 {
     //this->m_models.emplace_back("../../../asset/Cave/cave.obj");
+    m_shaders.emplace_back("../../../asset/SSR/ScreenQuad_vs.glsl",
+                           "../../../asset/SSR/ScreenQuad_fs.glsl");
 
     auto pModelv2 = std::make_shared<Modelv2<VertexPosNormalTexTanBitan>>("../../../asset/Cave/cave.obj", false, true);
     m_pModelv2 = pModelv2;
@@ -84,6 +87,9 @@ void SSRApp::initialize()
     gbuffer_pass.setModel(pModelv2);
     gbuffer_pass.setWH(window_->get_framebuffer_width(), window_->get_framebuffer_height());
     gbuffer_pass.InitPass();
+
+    mipmap_pass.setWH(window_->get_framebuffer_width(), window_->get_framebuffer_height());
+    mipmap_pass.InitPass();
 
 }
 
@@ -133,7 +139,7 @@ void SSRApp::updateCamera() {
 
 Light SSRApp::getLight()
 {
-    glm::vec3 light_pos = glm::vec3(2, 7, 2);
+    glm::vec3 light_pos = glm::vec3(1, 7, 1);
     glm::vec3 light_ambient(0.05, 0.05, 0.05);
     glm::vec3 light_diffuse(1.0, 1.0, 1.0);
     glm::vec3 light_specular(1.0, 1.0, 1.0);
@@ -187,11 +193,29 @@ void SSRApp::frameSSR()
     p_gbuffer_shader->setMat4("view", view);
     p_gbuffer_shader->setMat4("projection", projection);
 
-    p_gbuffer_shader->setInt("AlbedoMap", AlbedoMap);
-    p_gbuffer_shader->setInt("NormalMap", NormalMap);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, AlbedoMap);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, NormalMap);
+
+    p_gbuffer_shader->setInt("AlbedoMap", 0);
+    p_gbuffer_shader->setInt("NormalMap", 1);
 
     gbuffer_pass.RenderPass();
 
+    auto m_mipmap_shader = mipmap_pass.m_pMipmapShader;
+    m_mipmap_shader->use();
+    glBindImageTexture(0, gbuffer_pass.gOutput1, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
+    mipmap_pass.RenderPass();
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    m_shaders[0].use();
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, gbuffer_pass.gOutput0);
+    m_shaders[0].setInt("u_Texture2D", 1);
+    ExamplesVAO::renderQuad();
 
 }
 

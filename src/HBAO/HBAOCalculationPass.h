@@ -69,7 +69,6 @@ public:
         if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
             std::cout << "Framebuffer not complete!" << std::endl;
 
-
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
         // Generate Noise Texture

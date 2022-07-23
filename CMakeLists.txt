@@ -25,6 +25,7 @@ include_directories(
         ${PROJECT_SOURCE_DIR}/include/assimp-5.2.4/include/
         ${PROJECT_SOURCE_DIR}/include/glm/
         ${PROJECT_SOURCE_DIR}/include/
+        ${PROJECT_SOURCE_DIR}/include/spdlog/include/
 )
 
 ADD_SUBDIRECTORY("K:/Dependency/agz-utils/" lib/)
