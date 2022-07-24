@@ -26,7 +26,7 @@ public:
 
 
 private:
-	uint32_t VAO_id;
+	uint32_t VAO_id{};
 	std::shared_ptr<VertexBuffer> m_VertexBuffer;
 	std::shared_ptr<IndexBuffer> m_IndexBuffer;
 };

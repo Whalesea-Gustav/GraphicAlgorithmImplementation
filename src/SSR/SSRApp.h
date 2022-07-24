@@ -11,6 +11,8 @@
 #include "ShadowMapPass.h"
 #include "GBufferPass.h"
 #include "MipmapPass.h"
+#include "DirectPass.h"
+#include "IndirectPass.h"
 
 class SSRApp : public Demo
 {
@@ -54,9 +56,13 @@ private:
     float lastX;
     float lastY;
 
+    float lightRadience = 3.0f;
+
     ShadowMapPass shadowmap_pass;
     GBufferPass gbuffer_pass;
     MipmapComputePass mipmap_pass;
+    DirectPass direct_pass;
+    IndirectPass indirect_pass;
 };
 
 void SSRApp::initialize()
@@ -72,9 +78,12 @@ void SSRApp::initialize()
     AlbedoMap = loadTexture("../../../asset/Cave/albedo.jpg");
     NormalMap = loadTexture("../../../asset/Cave/normal.jpg");
 
-    m_camera.setPosition({ 0, 2, 3 });
-    m_camera.setDirection(-3.14159f * 0.5f, 0);
+    //m_camera.setPosition({ 0, 2, 3 });
+    //m_camera.setDirection(-3.14159f * 0.5f, 0);
+    m_camera.setPosition({3.54, 0.58, 1.55});
+    m_camera.setDirection(3.19, 0.17);
     m_camera.setPerspective(60.0f, 0.1f, 100.0f);
+
 
     this->mouse_->set_cursor_lock(true, this->window_->get_framebuffer_width() / 2.0, this->window_->get_framebuffer_height() / 2.0);
     this->mouse_->show_cursor(false);
@@ -91,6 +100,11 @@ void SSRApp::initialize()
     mipmap_pass.setWH(window_->get_framebuffer_width(), window_->get_framebuffer_height());
     mipmap_pass.InitPass();
 
+    direct_pass.setWH(window_->get_framebuffer_width(), window_->get_framebuffer_height());
+    direct_pass.InitPass();
+
+    indirect_pass.setWH(window_->get_framebuffer_width(), window_->get_framebuffer_height());
+    indirect_pass.InitPass();
 }
 
 void SSRApp::frame()
@@ -164,13 +178,14 @@ void SSRApp::frameSSR()
 {
     //Todo:
 
-    // 1. ShadowMap Pass
+    // 1. Generate ShadowMap from light Viewpoint
 
     auto& light = m_lights[0];
 
     glm::mat4 lightProjection = glm::ortho(-10.0f, 10.0f, -10.0f, 10.0f, m_camera.getNearZ(), m_camera.getFarZ());
     glm::mat4 lightView = glm::lookAt(light.position, glm::vec3(0, 1, 0), glm::vec3(0, 1, 0));
     glm::mat4 lightSpaceMatrix = lightProjection * lightView;
+    glm::vec3 lightDir = glm::normalize(glm::vec3(0, 1, 0) - light.position);
 
     auto model = glm::identity<glm::mat4>();
     auto view = m_camera.getView();
@@ -185,7 +200,7 @@ void SSRApp::frameSSR()
 
     shadowmap_pass.RenderPass();
 
-    // 2. Gbuffer Pass
+    // 2. Generate Two Gbuffers
 
     auto p_gbuffer_shader = gbuffer_pass.GetShader();
     p_gbuffer_shader->use();
@@ -203,17 +218,64 @@ void SSRApp::frameSSR()
 
     gbuffer_pass.RenderPass();
 
+    // 3. Generate Mipmaps
+
     auto m_mipmap_shader = mipmap_pass.m_pMipmapShader;
     m_mipmap_shader->use();
     glBindImageTexture(0, gbuffer_pass.gOutput1, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
     mipmap_pass.RenderPass();
+
+    // 4. Generate Direct Light Flux Texture
+
+
+    auto m_direct_shader = direct_pass.GetShader();
+    m_direct_shader->use();
+    m_direct_shader->setVec3("LightDir", lightDir);
+    m_direct_shader->setVec3("LightRadiance", glm::vec3(lightRadience));
+    m_direct_shader->setMat4("LightProjView", lightSpaceMatrix);
+
+    glActiveTexture(GL_TEXTURE3);
+    glBindTexture(GL_TEXTURE_2D, shadowmap_pass.depthTexture);
+    glActiveTexture(GL_TEXTURE4);
+    glBindTexture(GL_TEXTURE_2D, gbuffer_pass.gOutput0);
+    glActiveTexture(GL_TEXTURE5);
+    glBindTexture(GL_TEXTURE_2D, gbuffer_pass.gOutput1);
+
+    m_direct_shader->setInt("ShadowMap", 3);
+    m_direct_shader->setInt("GBuffer0", 4);
+    m_direct_shader->setInt("GBuffer1", 5);
+
+    direct_pass.RenderPass();
+
+    auto m_indirect_shader = indirect_pass.GetShader();
+    m_indirect_shader->use();
+    m_indirect_shader->setMat4("View", view);
+    m_indirect_shader->setMat4("Proj", projection);
+
+    glActiveTexture(GL_TEXTURE6);
+    glBindTexture(GL_TEXTURE_2D, direct_pass.directFluxTexture);
+    glActiveTexture(GL_TEXTURE7);
+    glBindTexture(GL_TEXTURE_2D, gbuffer_pass.gOutput0);
+    glActiveTexture(GL_TEXTURE8);
+    glBindTexture(GL_TEXTURE_2D, gbuffer_pass.gOutput1);
+    glActiveTexture(GL_TEXTURE9);
+    glBindTexture(GL_TEXTURE_2D, mipmap_pass.m_mipmap);
+
+    m_indirect_shader->setInt("Direct", 6);
+    m_indirect_shader->setInt("GBuffer0", 7);
+    m_indirect_shader->setInt("GBuffer1", 8);
+    m_indirect_shader->setInt("ViewDepth", 9);
+
+    indirect_pass.RenderPass();
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     m_shaders[0].use();
     glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, gbuffer_pass.gOutput0);
+    //glBindTexture(GL_TEXTURE_2D, gbuffer_pass.gOutput0);
+    //glBindTexture(GL_TEXTURE_2D, indirect_pass.indirectFluxTexture);
+    glBindTexture(GL_TEXTURE_2D, direct_pass.directFluxTexture);
     m_shaders[0].setInt("u_Texture2D", 1);
     ExamplesVAO::renderQuad();
 
