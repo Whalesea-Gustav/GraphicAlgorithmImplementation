@@ -5,8 +5,16 @@ layout(location = 0) in vec2 iUV;
 
 layout(location = 0) out vec4 oFragColor;
 
+#define M_EPS 1e-6
+#define M_PI 3.1415926535897932384626433832795
+#define TWO_PI 6.283185307
+#define INV_PI 0.31830988618
+#define INV_TWO_PI 0.15915494309
+
+
 uniform mat4 View;
 uniform mat4 Proj;
+uniform mat4 VP;
 uniform int IndirectSampleCount = 4;
 uniform int IndirectRayMaxSteps;
 uniform int FrameIndex;
@@ -17,9 +25,15 @@ uniform float DepthThreshold;
 uniform float RayMarchingStep;
 uniform int UseHierarchicalTrace;
 
+uniform vec3 cameraPos;
+uniform vec3 lightDir;
+uniform vec3 lightRadiance;
+uniform mat4 lightSpaceMatrix;
+
 uniform vec2 RawSamples[32];//sample count with IndirectSampleCount
 
 uniform sampler2D Direct;
+uniform sampler2D DepthMap;
 uniform sampler2D GBuffer0;
 uniform sampler2D GBuffer1;
 uniform sampler2D ViewDepth;
@@ -195,6 +209,194 @@ bool linearRayMarching(in float jitter, in vec3 ori, in vec3 dir, out vec2 res_u
     return false;
 }
 
+float Rand1(inout float p) {
+    p = fract(p * .1031);
+    p *= p + 33.33;
+    p *= p + p;
+    return fract(p);
+}
+
+vec2 Rand2(inout float p) {
+    return vec2(Rand1(p), Rand1(p));
+}
+
+float InitRand(vec2 uv) {
+    vec3 p3  = fract(vec3(uv.xyx) * .1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+vec3 SampleHemisphereUniform(inout float s, out float pdf) {
+    vec2 uv = Rand2(s);
+    float z = uv.x;
+    float phi = uv.y * TWO_PI;
+    float sinTheta = sqrt(1.0 - z*z);
+    vec3 dir = vec3(sinTheta * cos(phi), sinTheta * sin(phi), z);
+    pdf = INV_TWO_PI;
+    return dir;
+}
+
+vec3 SampleHemisphereCos(inout float s, out float pdf) {
+    vec2 uv = Rand2(s);
+    float z = sqrt(1.0 - uv.x);
+    float phi = uv.y * TWO_PI;
+    float sinTheta = sqrt(uv.x);
+    vec3 dir = vec3(sinTheta * cos(phi), sinTheta * sin(phi), z);
+    pdf = z * INV_PI;
+    return dir;
+}
+
+void LocalBasis(vec3 n, out vec3 b1, out vec3 b2) {
+    float sign_ = sign(n.z);
+    if (n.z == 0.0) {
+        sign_ = 1.0;
+    }
+    float a = -1.0 / (sign_ + n.z);
+    float b = n.x * n.y * a;
+    b1 = vec3(1.0 + sign_ * n.x * n.x * a, sign_ * b, -sign_ * n.x);
+    b2 = vec3(b, sign_ + n.y * n.y * a, -n.y);
+}
+
+vec4 Project(vec4 a) {
+    return a / a.w;
+}
+
+float GetDepth(vec3 posWorld) {
+    vec4 posView = View * vec4(posWorld, 1.0);
+    //float depth = (View * vec4(posWorld, 1.0)).w;
+    float depth = posView.z / posView.w;
+    return -depth;
+}
+
+vec2 GetScreenCoordinate(vec3 posWorld) {
+    vec2 uv = Project(Proj * View * vec4(posWorld, 1.0)).xy * 0.5 + 0.5;
+    return uv;
+}
+
+float GetGBufferDepth(vec2 uv) {
+    float depth = texture2D(GBuffer1, uv).z;
+    if (depth < 1e-2) {
+        depth = 1000.0;
+    }
+    return depth;
+}
+
+vec3 GetGBufferNormalWorld(vec2 uv) {
+    // get from g-buffer
+    vec4 p0 = texture(GBuffer0, uv);
+    vec4 p1 = texture(GBuffer1, uv);
+    vec2 oct_normal = vec2(p0.w, p1.w);
+    vec3 normal = decodeNormal(oct_normal);
+    return normal;
+}
+
+vec3 GetGBufferPosWorld(vec2 uv) {
+    // get from g-buffer
+    vec4 p0 = texture(GBuffer0, uv);
+    vec3 posWorld = p0.xyz;
+
+    return posWorld;
+}
+
+vec3 GetGBufferDiffuse(vec2 uv) {
+    // get from g-buffer
+    vec4 p1 = texture(GBuffer1, uv);
+    vec2 color1 = unpackHalf2x16(floatBitsToUint(p1.x));
+    vec3 albedo = vec3(color1.x, p1.g, color1.y);
+
+    vec3 diffuse = pow(albedo, vec3(2.2));
+    return diffuse;
+}
+
+float GetVisilibity(vec2 uv) {
+    vec3 posWorld = GetGBufferPosWorld(uv);
+    vec4 posLightSpace = lightSpaceMatrix * vec4(posWorld, 1.0);
+    posLightSpace = posLightSpace / posLightSpace.w;
+    float currentDepth = posLightSpace.z;
+
+    vec2 lightUV = posLightSpace.xy * 0.5 + 0.5;
+
+    float closetDepth = texture(DepthMap, lightUV).r;
+
+    float visibility = 0.0;
+    if (currentDepth - 0.005 < closetDepth)
+    {
+        visibility = 1.0;
+    }
+
+    return visibility;
+}
+
+float GetShadowFactor(vec2 uv)
+{
+    vec4 p0 = texture(GBuffer0, uv);
+    vec4 p1 = texture(GBuffer1, uv);
+    vec3 pos = p0.xyz;
+    vec2 oct_normal = vec2(p0.w, p1.w);
+    vec3 normal = decodeNormal(oct_normal);
+    vec2 color1 = unpackHalf2x16(floatBitsToUint(p1.x));
+    vec3 albedo = vec3(color1.x, p1.g, color1.y);
+
+    //view_z : positive
+    float view_z = p1.z;
+
+    vec4 clip_coord = lightSpaceMatrix * vec4(pos + normal * 0.02, 1.0);
+    vec3 ndc_coord = (clip_coord.xyz / clip_coord.w) * 0.5 + 0.5;
+    float shadow_z = texture(DepthMap, ndc_coord.xy).r;
+    float shadow_factor = shadow_z >= ndc_coord.z ? 1 : 0;
+
+    return shadow_factor;
+}
+
+/*
+ * Evaluate diffuse bsdf value.
+ *
+ * wi, wo are all in world space.
+ * uv is in screen space, [0, 1] x [0, 1].
+ * wi,wo入射方向和出射方向
+ */
+vec3 EvalDiffuse(vec3 wi, vec3 wo, vec2 uv) {
+    // vec3 L = vec3(0.0);
+    vec3 albedo = GetGBufferDiffuse(uv);//获取漫反射率
+    vec3 normal =normalize(GetGBufferNormalWorld(uv));//获取法线
+    float cosTheta =max(0.0,dot(normalize(wi),normal));//漫反射夹角不能为负! 不然间接光存在黑边
+    return albedo *INV_PI *cosTheta;
+}
+
+vec3 EvalDirectionalLight(vec2 uv) {
+    // vec3 Le = vec3(0.0);
+    //vec3 Le = lightRadiance * GetVisilibity(uv);
+    vec3 Le = lightRadiance * GetShadowFactor(uv);
+    return Le;
+}
+
+/*
+  RayMarch
+*/
+bool RayMarch(vec3 ori, vec3 dir, out vec3 hitPos) {
+    float step = 0.02;
+    float halfStep = 0.025;
+    vec3 iterPos = ori;
+
+    for (int i = 0; i < 100; ++i)
+    {
+        vec3 nextPos = iterPos + dir * step;
+        float nextDepth = GetDepth(nextPos);
+        float closestDepth = GetGBufferDepth(GetScreenCoordinate(nextPos));
+        if (nextDepth - closestDepth < M_EPS)
+        {
+            hitPos = nextPos;
+            return true;
+        }
+        else
+        {
+            iterPos = nextPos;
+        }
+    }
+
+    return false;
+}
+
 void main() {
     // get from g-buffer
     vec4 p0 = texture(GBuffer0, iUV);
@@ -204,58 +406,39 @@ void main() {
     vec3 normal = decodeNormal(oct_normal);
     vec2 color1 = unpackHalf2x16(floatBitsToUint(p1.x));
     vec3 albedo = vec3(color1.x, p1.g, color1.y);
-    //positive
-    float view_z = p1.z;
 
-    //transform to view space
-    vec3 ori = vec3(View * vec4(pos, 1.0));
+    vec3 wo = normalize(cameraPos - pos);
+    vec3 wi = normalize(-lightDir);
 
-    //build local coord from normal for pos
-    vec3 local_z = normal;
-    vec3 local_y;
-    if (abs(dot(local_z, vec3(1, 0, 0))) < 0.7)// approximate cos45
-    local_y = cross(local_z, vec3(1, 0, 0));
-    else
-    local_y = cross(local_z, vec3(0, 1, 0));
-    local_y = normalize(local_y);
-    vec3 local_x = cross(local_y, local_z);
+    float s = InitRand(gl_FragCoord.xy);
 
-    //indirect
-    //each fragment and frame random offset for accumulate
-    vec2 sample_offset = vec2(fract(sin(FrameIndex + dot(pos.xy, vec2(12.9898, 78.233) * 2.0)) * 43758.5453));
-    vec3 indirect_sum = vec3(0);
-    for (int i = 0; i < IndirectSampleCount; ++i){
-        vec2 rand = RawSamples[i];
-        rand = fract(rand + sample_offset);
+    vec3 L_direct = EvalDiffuse(wi, wo,iUV) * EvalDirectionalLight(iUV);
 
-        //sample hemisphere
-        float sin_theta = sqrt(1 - rand.x);
-        float phi = 2 * PI * rand.y;
-        float cos_theta = sqrt(rand.x);
+    vec3 L_indirect = vec3(0.0);
 
-        //local dir in z-hemisphere
-        vec3 local_dir = vec3(cos_theta * cos(phi), cos_theta * sin(phi), sin_theta);
-        vec3 dir = local_dir.x * local_x + local_dir.y * local_y + local_dir.z * local_z;
-        dir = vec3(View * vec4(dir, 0));
-
-        float jitter = fract(sin(FrameIndex + rand.x * 12.9898 * 2) * 43758.5453);
-
-        //perform ray marching/trace accoding to ori and dir
-        vec2 uv;
-        if (bool(UseHierarchicalTrace)){
-            if (hierarchicalRayTrace(jitter, ori, dir, uv)){
-                //using mc cos-weight hemisphere sample, pdf is cos/PI
-                vec3 direct = texture(Direct, uv).rgb;
-                indirect_sum += direct;
-            }
-        }
-        else {
-            if (linearRayMarching(jitter, ori, dir, uv)){
-                vec3 direct = texture(Direct, uv).rgb;
-                indirect_sum += direct;
-            }
+    for (int i = 0; i < IndirectSampleCount; ++i)
+    {
+        float pdf = 0.0;
+        Rand1(s);
+        vec3 sampleDir = SampleHemisphereUniform(s, pdf);
+        vec3 b1, b2;
+        LocalBasis(normal, b1, b2);
+        //TBN * sampleDir = Get sampleDir in WorldSpace
+        sampleDir = normalize(mat3(b1, b2, normal) * sampleDir);
+        vec3 hitPos = vec3(0.0);
+        bool isHit = RayMarch(pos.xyz, sampleDir, hitPos);
+        if (isHit)
+        {
+            vec2 local_uv = GetScreenCoordinate(hitPos);
+            //vec3 local_wo = normalize(vPosWorld.xyz - hitPos);
+            vec3 local_L = EvalDiffuse(sampleDir, wo, iUV) / pdf * EvalDiffuse(wi, sampleDir, local_uv) * EvalDirectionalLight(local_uv);
+            L_indirect += local_L;
+            //L_indirect += vec3(1.0);
         }
     }
+    L_indirect = L_indirect / float(IndirectSampleCount);
 
-    oFragColor = vec4(PI * indirect_sum / IndirectSampleCount, 1);
+    vec3 L = L_direct + L_indirect;
+    vec3 color = pow(clamp(L, vec3(0.0), vec3(1.0)), vec3(1.0 / 2.2));
+    oFragColor = vec4(vec3(color.rgb), 1.0);
 }

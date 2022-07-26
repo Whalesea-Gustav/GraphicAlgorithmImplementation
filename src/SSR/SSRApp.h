@@ -13,6 +13,8 @@
 #include "MipmapPass.h"
 #include "DirectPass.h"
 #include "IndirectPass.h"
+#include "AccumulatePass.h"
+#include "FinalPass.h"
 
 class SSRApp : public Demo
 {
@@ -56,13 +58,17 @@ private:
     float lastX;
     float lastY;
 
-    float lightRadience = 3.0f;
+    float lightRadience = 15.0f;
 
     ShadowMapPass shadowmap_pass;
     GBufferPass gbuffer_pass;
+    GBufferPass gbuffer_pass_alternative;
+    GBufferPass* p_gbuffer_pass;
     MipmapComputePass mipmap_pass;
     DirectPass direct_pass;
     IndirectPass indirect_pass;
+    AccumulateComputePass accumulate_pass;
+    FinalPass final_pass;
 };
 
 void SSRApp::initialize()
@@ -85,8 +91,10 @@ void SSRApp::initialize()
     m_camera.setPerspective(60.0f, 0.1f, 100.0f);
 
 
-    this->mouse_->set_cursor_lock(true, this->window_->get_framebuffer_width() / 2.0, this->window_->get_framebuffer_height() / 2.0);
-    this->mouse_->show_cursor(false);
+    //initialize while mouse is still
+    this->mouse_->set_cursor_lock(false, this->window_->get_framebuffer_width() / 2.0, this->window_->get_framebuffer_height() / 2.0);
+    this->mouse_->show_cursor(true);
+
     window_->do_events();
 
     shadowmap_pass.setModel(pModelv2);
@@ -97,6 +105,12 @@ void SSRApp::initialize()
     gbuffer_pass.setWH(window_->get_framebuffer_width(), window_->get_framebuffer_height());
     gbuffer_pass.InitPass();
 
+    gbuffer_pass_alternative.setModel(pModelv2);
+    gbuffer_pass_alternative.setWH(window_->get_framebuffer_width(), window_->get_framebuffer_height());
+    gbuffer_pass_alternative.InitPass();
+
+    p_gbuffer_pass = &gbuffer_pass;
+
     mipmap_pass.setWH(window_->get_framebuffer_width(), window_->get_framebuffer_height());
     mipmap_pass.InitPass();
 
@@ -105,6 +119,12 @@ void SSRApp::initialize()
 
     indirect_pass.setWH(window_->get_framebuffer_width(), window_->get_framebuffer_height());
     indirect_pass.InitPass();
+
+    accumulate_pass.setWH(window_->get_framebuffer_width(), window_->get_framebuffer_height());
+    accumulate_pass.InitPass();
+
+    final_pass.setWH(window_->get_framebuffer_width(), window_->get_framebuffer_height());
+    final_pass.InitPass();
 }
 
 void SSRApp::frame()
@@ -125,7 +145,20 @@ void SSRApp::frame()
     //update camera
     updateCamera();
 
+
+    bool gui = ImGui::Begin("Settings", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+
+    if(gui)
+    {
+        ImGui::Text("Light Radiance");
+        ImGui::InputFloat("Radiance", &lightRadience, 20.0f);
+    }
+
     frameSSR();
+
+    ImGui::End();
+
+
 }
 
 void SSRApp::destroy()
@@ -148,7 +181,7 @@ void SSRApp::updateCamera() {
                                 .cursorRelY = static_cast<float>(mouse_->get_relative_cursor_y())
                         });
     }
-    m_camera.recalculateMatrics();
+    m_camera.recalculateMatrics_posz();
 }
 
 Light SSRApp::getLight()
@@ -200,9 +233,15 @@ void SSRApp::frameSSR()
 
     shadowmap_pass.RenderPass();
 
-    // 2. Generate Two Gbuffers
+    // 2. Generate Two GBuffers
+    // Alternative using two gbuffer-pass for rendering
+    // gbuffer_pass for one frame
+    // gbuffer_pass_alternative for next frame
+    // p_gbuffer_pass point to current used gbuffer_pass
+    auto p_prev_gbuffer_pass = p_gbuffer_pass;
+    p_gbuffer_pass = p_gbuffer_pass == &gbuffer_pass ? &gbuffer_pass_alternative : &gbuffer_pass;
 
-    auto p_gbuffer_shader = gbuffer_pass.GetShader();
+    auto p_gbuffer_shader = p_gbuffer_pass->GetShader();
     p_gbuffer_shader->use();
     p_gbuffer_shader->setMat4("model", model);
     p_gbuffer_shader->setMat4("view", view);
@@ -216,18 +255,16 @@ void SSRApp::frameSSR()
     p_gbuffer_shader->setInt("AlbedoMap", 0);
     p_gbuffer_shader->setInt("NormalMap", 1);
 
-    gbuffer_pass.RenderPass();
+    p_gbuffer_pass->RenderPass();
 
     // 3. Generate Mipmaps
 
     auto m_mipmap_shader = mipmap_pass.m_pMipmapShader;
     m_mipmap_shader->use();
-    glBindImageTexture(0, gbuffer_pass.gOutput1, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
+    glBindImageTexture(0, p_gbuffer_pass->gOutput1, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
     mipmap_pass.RenderPass();
 
     // 4. Generate Direct Light Flux Texture
-
-
     auto m_direct_shader = direct_pass.GetShader();
     m_direct_shader->use();
     m_direct_shader->setVec3("LightDir", lightDir);
@@ -237,9 +274,9 @@ void SSRApp::frameSSR()
     glActiveTexture(GL_TEXTURE3);
     glBindTexture(GL_TEXTURE_2D, shadowmap_pass.depthTexture);
     glActiveTexture(GL_TEXTURE4);
-    glBindTexture(GL_TEXTURE_2D, gbuffer_pass.gOutput0);
+    glBindTexture(GL_TEXTURE_2D, p_gbuffer_pass->gOutput0);
     glActiveTexture(GL_TEXTURE5);
-    glBindTexture(GL_TEXTURE_2D, gbuffer_pass.gOutput1);
+    glBindTexture(GL_TEXTURE_2D, p_gbuffer_pass->gOutput1);
 
     m_direct_shader->setInt("ShadowMap", 3);
     m_direct_shader->setInt("GBuffer0", 4);
@@ -247,6 +284,7 @@ void SSRApp::frameSSR()
 
     direct_pass.RenderPass();
 
+    // 5. Generate Indirect Light Flux Texture
     auto m_indirect_shader = indirect_pass.GetShader();
     m_indirect_shader->use();
     m_indirect_shader->setMat4("View", view);
@@ -255,29 +293,65 @@ void SSRApp::frameSSR()
     glActiveTexture(GL_TEXTURE6);
     glBindTexture(GL_TEXTURE_2D, direct_pass.directFluxTexture);
     glActiveTexture(GL_TEXTURE7);
-    glBindTexture(GL_TEXTURE_2D, gbuffer_pass.gOutput0);
+    glBindTexture(GL_TEXTURE_2D, p_gbuffer_pass->gOutput0);
     glActiveTexture(GL_TEXTURE8);
-    glBindTexture(GL_TEXTURE_2D, gbuffer_pass.gOutput1);
+    glBindTexture(GL_TEXTURE_2D, p_gbuffer_pass->gOutput1);
     glActiveTexture(GL_TEXTURE9);
     glBindTexture(GL_TEXTURE_2D, mipmap_pass.m_mipmap);
 
+    m_indirect_shader->setInt("DepthMap", 3);
     m_indirect_shader->setInt("Direct", 6);
     m_indirect_shader->setInt("GBuffer0", 7);
     m_indirect_shader->setInt("GBuffer1", 8);
     m_indirect_shader->setInt("ViewDepth", 9);
 
+    m_indirect_shader->setVec3("cameraPos", m_camera.getPosition());
+    m_indirect_shader->setVec3("lightDir", lightDir);
+    m_indirect_shader->setVec3("lightRadiance", glm::vec3(lightRadience));
+    m_indirect_shader->setMat4("lightSpaceMatrix", lightSpaceMatrix);
+
     indirect_pass.RenderPass();
 
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    m_shaders[0].use();
-    glActiveTexture(GL_TEXTURE1);
-    //glBindTexture(GL_TEXTURE_2D, gbuffer_pass.gOutput0);
-    //glBindTexture(GL_TEXTURE_2D, indirect_pass.indirectFluxTexture);
-    glBindTexture(GL_TEXTURE_2D, direct_pass.directFluxTexture);
-    m_shaders[0].setInt("u_Texture2D", 1);
-    ExamplesVAO::renderQuad();
+    // 6. Accumulation Pass for smooth rendering
+    glBindImageTexture(0, p_gbuffer_pass->gOutput0, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA8);
+    glBindImageTexture(1, indirect_pass.indirectFluxTexture, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA8);
+    glBindTextureUnit(1, p_prev_gbuffer_pass->gOutput0);
+
+    accumulate_pass.RenderPass();
+
+    // 7. Combine Direct and Indirect Illumination
+
+    bool update = false;
+    update |= ImGui::Checkbox("Enable Direct", &final_pass.enable_direct);
+    update |= ImGui::Checkbox("Enable Indirect", &final_pass.enable_indirect);
+    update |= ImGui::Checkbox("Enable Tone Mapping", &final_pass.enable_tonemap);
+    update |= ImGui::SliderFloat("Exposure", &final_pass.exposure, 0, 10);
+
+    auto p_final_pass_shader = final_pass.GetShader();
+    p_final_pass_shader->use();
+    glBindTextureUnit(0, direct_pass.directFluxTexture);
+    glBindTextureUnit(1, accumulate_pass.m_dst_texture);
+    glBindTextureUnit(2, p_gbuffer_pass->gOutput1);
+    if (update)
+    {
+        final_pass.setRenderParameters();
+    }
+    p_final_pass_shader->setInt("Direct", 0);
+    p_final_pass_shader->setInt("Indirect", 1);
+    p_final_pass_shader->setInt("GBuffer1", 2);
+    final_pass.RenderPass();
+
+
+//    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+//    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+//    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+//    m_shaders[0].use();
+//    glActiveTexture(GL_TEXTURE1);
+//    //glBindTexture(GL_TEXTURE_2D, gbuffer_pass.gOutput0);
+//    //glBindTexture(GL_TEXTURE_2D, indirect_pass.indirectFluxTexture);
+//    glBindTexture(GL_TEXTURE_2D, indirect_pass.indirectFluxTexture);
+//    m_shaders[0].setInt("u_Texture2D", 1);
+//    ExamplesVAO::renderQuad();
 
 }
 

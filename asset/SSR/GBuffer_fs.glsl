@@ -44,5 +44,5 @@ void main()
 
     //ok, just need two rgba32f texture
     gOutput0 = vec4(wPosition, normal.x);
-    gOutput1 = vec4(color1, color2, -viewDepth, normal.y);
+    gOutput1 = vec4(color1, color2, viewDepth, normal.y);
 }

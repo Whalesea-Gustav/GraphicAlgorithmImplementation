@@ -45,6 +45,8 @@ public:
 
     void recalculateMatrics() noexcept;
 
+    void recalculateMatrics_posz() noexcept;
+
     float getNearZ() const noexcept;
 
     float getFarZ() const noexcept;
@@ -60,6 +62,8 @@ public:
     const glm::mat4 &getProj() const noexcept;
 
     const glm::mat4 &getViewProj() const noexcept;
+
+    glm::mat4 m_lookat(glm::vec3 eye, glm::vec3 center, glm::vec3 up);
 
 private:
 

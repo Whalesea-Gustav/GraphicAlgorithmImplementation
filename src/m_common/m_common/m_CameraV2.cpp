@@ -79,14 +79,23 @@ void m_Camera::setWOverH(float wOverH) noexcept
 
 void m_Camera::recalculateMatrics() noexcept
 {
+    //modify view and proj matrix to meet SSR template project
     const glm::vec3 dir = computeDirection();
     view_ = glm::lookAt(pos_, pos_+dir, {0, 1, 0});
+    //view_ = m_lookat(pos_, pos_+dir, {0, 1, 0});
+//    view_[0][2] = -view_[0][2];
+//    view_[1][2] = -view_[1][2];
+//    view_[2][2] = -view_[2][2];
+//    view_[3][2] = -view_[3][2];
 
     proj_ = glm::perspective(
             agz::math::deg2rad(fovDeg_),
             wOverH_,
             nearZ_,
             farZ_);
+
+//    proj_[2][2] = -proj_[2][2];
+//    proj_[2][3] = -proj_[2][3];
 
     viewProj_ = view_ * proj_;
 }
@@ -137,4 +146,53 @@ glm::vec3 m_Camera::computeDirection() const
 
 float m_Camera::getFovDegree() const noexcept {
     return fovDeg_;
+}
+
+glm::mat4 m_Camera::m_lookat(glm::vec3 eye, glm::vec3 center, glm::vec3 up) {
+    glm::vec3 f(glm::normalize(center - eye));
+    glm::vec3 s(glm::normalize(cross(up, f)));
+    glm::vec3 u(cross(f, s));
+
+    glm::mat4 Result(1);
+    Result[0][0] = s.x;
+    Result[1][0] = s.y;
+    Result[2][0] = s.z;
+    Result[3][0] = 0.0f;
+    Result[0][1] = u.x;
+    Result[1][1] = u.y;
+    Result[2][1] = u.z;
+    Result[3][1] = 0.0f;
+    Result[0][2] = f.x;
+    Result[1][2] = f.y;
+    Result[2][2] = f.z;
+    Result[3][2] = 0.0f;
+    Result[0][3] = eye.x;
+    Result[1][3] = eye.y;
+    Result[2][3] = eye.z;
+    Result[3][3] = 1.0f;
+
+    return glm::inverse(Result);
+}
+
+void m_Camera::recalculateMatrics_posz() noexcept {
+
+    //View Coordinate with positive Z axis point to Objects
+    const glm::vec3 dir = computeDirection();
+    view_ = glm::lookAt(pos_, pos_+dir, {0, 1, 0});
+    //view_ = m_lookat(pos_, pos_+dir, {0, 1, 0});
+    view_[0][2] = -view_[0][2];
+    view_[1][2] = -view_[1][2];
+    view_[2][2] = -view_[2][2];
+    view_[3][2] = -view_[3][2];
+
+    proj_ = glm::perspective(
+            agz::math::deg2rad(fovDeg_),
+            wOverH_,
+            nearZ_,
+            farZ_);
+
+    proj_[2][2] = -proj_[2][2];
+    proj_[2][3] = -proj_[2][3];
+
+    viewProj_ = view_ * proj_;
 }
