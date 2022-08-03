@@ -22,7 +22,9 @@ SET(AGZ_ENABLE_GL ON)
 link_directories(${PROJECT_SOURCE_DIR}/lib)
 # assimp
 include_directories(
-        ${PROJECT_SOURCE_DIR}/include/assimp-5.2.4/include/
+        ${PROJECT_SOURCE_DIR}/include/assimp/include
+        ${PROJECT_SOURCE_DIR}/include/assimp/cmake-build-debug/include
+
         ${PROJECT_SOURCE_DIR}/include/glm/
         ${PROJECT_SOURCE_DIR}/include/
         ${PROJECT_SOURCE_DIR}/include/spdlog/include/

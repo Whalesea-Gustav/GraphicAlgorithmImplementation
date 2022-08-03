@@ -44,8 +44,10 @@ bool hierarchicalRayTrace(in float jitter, in vec3 ori, in vec3 dir, out vec2 re
     //    if(below z plane) --level;
 
     float ray_len = (ori.z + dir.z < 0.1) ? (0.1 - ori.z) / dir.z : 1;
+    //one step of dir from origin
     vec3 end = ori + dir * ray_len;
 
+    //world space
     vec4 ori_clip = Proj * vec4(ori, 1.0);
     vec4 end_clip = Proj * vec4(end, 1.0);
 
@@ -79,8 +81,10 @@ bool hierarchicalRayTrace(in float jitter, in vec3 ori, in vec3 dir, out vec2 re
     // unit delta ndc per pixel
     vec2 dp = vec2(dx, dy);
 
+    //positive here if view and proj with positive z
     float ori_z_over_w = ori.z * inv_ori_w;//-1 ~ 1
     float end_z_over_w = end.z * inv_end_w;
+    // delta z and delta inv_w per pixel
     // z / w is linear in ndc coord
     float dz_over_w = (end_z_over_w - ori_z_over_w) / extend_ndc.x * dx;
     // 1 / w is linear in ndc coord
