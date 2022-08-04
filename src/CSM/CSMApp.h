@@ -8,9 +8,12 @@
 #include <m_common/m_FrameBuffer.h>
 #include <m_common/m_ComputeShader.h>
 #include <m_common/m_ExamplesVAO.h>
-#include "RSMGBufferPass.h"
-#include "GBufferPass.h"
-#include "ShadingComputePass.h"
+
+#include "DepthMapsPass.h"
+
+//Todo:
+// 1. Generate ShadowMaps for Cascade Frustrum
+
 
 class CSMApp : public Demo
 {
@@ -26,7 +29,7 @@ protected:
 
     void frameDebug();
 
-    void frameRSM();
+    void frameCSM();
 
 private:
 
@@ -55,16 +58,15 @@ private:
 
     DirectionalLight dirLight;
 
-    RSMGBufferPass rsm_gbuffer_pass; //light source pass
-    GBufferPass gbuffer_pass;
-    ShadingComputePass shadingcompute_pass;
+    DepthMapsPass depthmap_pass;
+
 };
 
 void CSMApp::initialize()
 {
     m_camera.setPosition({ 0, 2, 3 });
     m_camera.setDirection(-3.14159f * 0.5f, 0);
-    m_camera.setPerspective(60.0f, 0.1f, 100.0f);
+    m_camera.setPerspective(60.0f, 0.1f, 500.0f);
 
     this->mouse_->set_cursor_lock(true, this->window_->get_framebuffer_width() / 2.0, this->window_->get_framebuffer_height() / 2.0);
     this->mouse_->show_cursor(false);
@@ -75,22 +77,13 @@ void CSMApp::initialize()
     this->m_lights.push_back(getLight());
 
     auto pModel = std::make_shared<Model<VertexPosNormalTex>>("../../../asset/Sponza/sponza.obj");
-    int RSM_resolution = 1024;
+    int CSM_resolution = 4096;
 
-    rsm_gbuffer_pass.setWH(RSM_resolution, RSM_resolution);
-    rsm_gbuffer_pass.setModel(pModel);
-    rsm_gbuffer_pass.initV();
-
-    gbuffer_pass.setWH(RSM_resolution, RSM_resolution);
-    gbuffer_pass.setModel(pModel);
-    gbuffer_pass.initV();
-
-    //shadingcompute_pass.setWH(window_->get_framebuffer_width(), window_->get_framebuffer_height());
-    shadingcompute_pass.setWH(RSM_resolution, RSM_resolution);
-    shadingcompute_pass.initV();
-
-    //Quad Shader
-    m_shaders.emplace_back("../../../asset/RSM/ScreenQuad_vs.glsl", "../../../asset/RSM/ScreenQuad_fs.glsl");
+    depthmap_pass.setWH(CSM_resolution, CSM_resolution);
+    depthmap_pass.setCameraZ(m_camera.getFarZ(), m_camera.getNearZ());
+    depthmap_pass.cameraView = m_camera.getView();
+    depthmap_pass.aspectRatio = float(window_->get_framebuffer_width()) / float(window_->get_framebuffer_height());
+    depthmap_pass.InitPass();
 
 }
 
@@ -112,7 +105,7 @@ void CSMApp::frame()
     //update camera
     updateCamera();
 
-    //frameRSM();
+    //frameCSM();
     frameDebug();
 }
 
@@ -163,7 +156,7 @@ Light CSMApp::getLight()
 }
 
 
-void CSMApp::frameRSM()
+void CSMApp::frameCSM()
 {
     auto& light = m_lights[0];
 
@@ -249,84 +242,5 @@ void CSMApp::frameRSM()
 
 void CSMApp::frameDebug()
 {
-    //Todo:
-    // 1. Add RSM Light GBuffer Pass
-    // 2. Adjust Light Position, enable to see the inside of sponza
-    // 3. Add Camera GBuffer Pass
-    // 4. Add Shading Pass (Using Compute Shader)
-
-
-    //RSM GBuffer Pass
-    auto& light = m_lights[0];
-    glm::mat4 lightProjection = glm::ortho(-10.0f, 10.0f, -10.0f, 10.0f, m_camera.getNearZ(), m_camera.getFarZ());
-    glm::mat4 lightView = glm::lookAt(light.position, glm::vec3(0, 1, 0), glm::vec3(0, 1, 0));
-    glm::mat4 lightSpaceMatrix = lightProjection * lightView;
-
-    auto p_rsm_gbuffer_shader = rsm_gbuffer_pass.getShader();
-    auto model = glm::identity<glm::mat4>();
-    auto view = m_camera.getView();
-    auto projection = m_camera.getProj();
-    p_rsm_gbuffer_shader->use();
-    p_rsm_gbuffer_shader->setMat4("model", model);
-    p_rsm_gbuffer_shader->setMat4("view", view);
-    p_rsm_gbuffer_shader->setMat4("projection", projection);
-    p_rsm_gbuffer_shader->setMat4("lightViewProjection", lightSpaceMatrix);
-    rsm_gbuffer_pass.updateV();
-
-    //Camera GBuffer Pass
-    auto p_gbuffer_shader = gbuffer_pass.getShader();
-    p_gbuffer_shader->use();
-    p_gbuffer_shader->setMat4("model", model);
-    p_gbuffer_shader->setMat4("view", view);
-    p_gbuffer_shader->setMat4("projection", projection);
-    gbuffer_pass.updateV();
-
-
-    //Shading Compute Pass
-    auto p_shading_cs = shadingcompute_pass.getShader();
-    p_shading_cs->use();
-
-    //6 texture
-    glActiveTexture(GL_TEXTURE4);
-    glBindTexture(GL_TEXTURE_2D, gbuffer_pass.gAlbedo);
-    glActiveTexture(GL_TEXTURE5);
-    glBindTexture(GL_TEXTURE_2D, gbuffer_pass.gNormal);
-    glActiveTexture(GL_TEXTURE6);
-    glBindTexture(GL_TEXTURE_2D, gbuffer_pass.gPosition);
-    glActiveTexture(GL_TEXTURE7);
-    glBindTexture(GL_TEXTURE_2D, rsm_gbuffer_pass.gFlux);
-    glActiveTexture(GL_TEXTURE8);
-    glBindTexture(GL_TEXTURE_2D, rsm_gbuffer_pass.gNormal);
-    glActiveTexture(GL_TEXTURE9);
-    glBindTexture(GL_TEXTURE_2D, rsm_gbuffer_pass.gPosition);
-
-    p_shading_cs->setInt("u_AlbedoTexture", 4);
-    p_shading_cs->setInt("u_NormalTexture", 5);
-    p_shading_cs->setInt("u_PositionTexture", 6);
-    p_shading_cs->setInt("u_RSMFluxTexture", 7);
-    p_shading_cs->setInt("u_RSMNormalTexture", 8);
-    p_shading_cs->setInt("u_RSMPositionTexture", 9);
-
-
-    p_shading_cs->setMat4("u_LightVPMatrixMulInverseCameraViewMatrix", lightSpaceMatrix * glm::inverse(view));
-
-    p_shading_cs->setFloat("u_MaxSampleRadius", 25.0f);
-    p_shading_cs->setInt("u_RSMSize", rsm_gbuffer_pass.m_height);
-    p_shading_cs->setInt("u_VPLNum", shadingcompute_pass.m_VPLNum);
-    glm::vec4 lightDir = glm::vec4(glm::vec3(0, 1, 0) - light.position, 0.0f);
-    p_shading_cs->setVec3("u_LightDirInViewSpace", glm::normalize(glm::vec3(view * lightDir)));
-
-    shadingcompute_pass.updateV();
-
-    //Render Quad
-    glViewport(0, 0, 1024, 1024);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    auto& screen_shader = m_shaders[0];
-    screen_shader.use();
-    screen_shader.setInt("u_Texture2D", 0);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, shadingcompute_pass.m_texture);
-    ExamplesVAO::renderQuad();
+    depthmap_pass.RenderPass();
 }

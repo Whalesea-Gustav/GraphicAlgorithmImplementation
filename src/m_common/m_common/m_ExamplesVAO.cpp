@@ -1,9 +1,13 @@
 #include <m_common/m_ExamplesVAO.h>
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <random>
 
 int ExamplesVAO::sphereVAOIndex = -1;
 int ExamplesVAO::cubeVAOIndex = -1;
 int ExamplesVAO::quadVAOIndex = -1;
+int ExamplesVAO::planeVAOIndex = -1;
+
 vector<shared_ptr<VertexArrayBuffer>> ExamplesVAO::example_VAO_arr = {};
 
 void ExamplesVAO::renderSphere()
@@ -208,3 +212,77 @@ void ExamplesVAO::renderQuad()
     glDrawElements(GL_TRIANGLE_STRIP, indexCount, GL_UNSIGNED_INT, 0);
     quadVAOptr->UnBind();
 }
+
+void ExamplesVAO::renderPlane() {
+    if (ExamplesVAO::planeVAOIndex == -1)
+    {
+        float planeVertices[] = {
+                // positions            // normals         // texcoords
+                25.0f, -2.0f,  25.0f,  0.0f, 1.0f, 0.0f,  25.0f,  0.0f,
+                -25.0f, -2.0f,  25.0f,  0.0f, 1.0f, 0.0f,   0.0f,  0.0f,
+                -25.0f, -2.0f, -25.0f,  0.0f, 1.0f, 0.0f,   0.0f, 25.0f,
+                25.0f, -2.0f,  25.0f,  0.0f, 1.0f, 0.0f,  25.0f,  0.0f,
+                -25.0f, -2.0f, -25.0f,  0.0f, 1.0f, 0.0f,   0.0f, 25.0f,
+                25.0f, -2.0f, -25.0f,  0.0f, 1.0f, 0.0f,  25.0f, 25.0f
+        };
+
+        unsigned int indices[] =
+                {
+                        0, 1, 2, 3, 4, 5
+                };
+        unsigned int indices_count = 6;
+
+        std::shared_ptr<VertexBuffer> VBO = VertexBuffer::Create(planeVertices, sizeof(planeVertices));
+        BufferLayout layout{{"position", OpenGLDataType::Float, 3},
+                            {"normal", OpenGLDataType::Float, 3},
+                            { "texcoord", OpenGLDataType::Float, 2}};
+        VBO->SetLayout(layout);
+        std::shared_ptr<IndexBuffer> IBO = IndexBuffer::Create(indices, indices_count);
+        std::shared_ptr<VertexArrayBuffer> VAO = VertexArrayBuffer::Create(VBO, IBO);
+
+        ExamplesVAO::planeVAOIndex = ExamplesVAO::example_VAO_arr.size();
+        ExamplesVAO::example_VAO_arr.push_back(VAO);
+    }
+
+    auto planeVAOptr = ExamplesVAO::example_VAO_arr[ExamplesVAO::planeVAOIndex];
+    planeVAOptr->Bind();
+    unsigned int indexCount = planeVAOptr->GetIndexBuffer()->GetCount();
+    glDrawArrays(GL_TRIANGLES, 0, indexCount);
+    planeVAOptr->UnBind();
+}
+
+static std::random_device device;
+static std::mt19937 generator = std::mt19937(device());
+
+void ExamplesVAO::renderScene(Shader *shader) {
+    glm::mat4 model = glm::mat4(1.0f);
+
+    shader->use();
+    shader->setMat4("model", model);
+    renderPlane();
+
+    static std::vector<glm::mat4> modelMatrices;
+    if (modelMatrices.empty())
+    {
+        for (int i = 0; i < 10; ++i)
+        {
+            static std::uniform_real_distribution<float> offsetDistribution = std::uniform_real_distribution<float>(-10, 10);
+            static std::uniform_real_distribution<float> scaleDistribution = std::uniform_real_distribution<float>(1.0, 2.0);
+            static std::uniform_real_distribution<float> rotationDistribution = std::uniform_real_distribution<float>(0, 180);
+
+            model = glm::mat4(1.0f);
+            model = glm::translate(model, glm::vec3(offsetDistribution(generator), offsetDistribution(generator) + 10.0f, offsetDistribution(generator)));
+            model = glm::rotate(model, glm::radians(rotationDistribution(generator)), glm::normalize(glm::vec3(1.0, 0.0, 1.0)));
+            model = glm::scale(model, glm::vec3(scaleDistribution(generator)));
+            modelMatrices.push_back(model);
+        }
+    }
+
+    for (const auto& local_model : modelMatrices)
+    {
+        shader->setMat4("model", local_model);
+        renderCube();
+    }
+}
+
+

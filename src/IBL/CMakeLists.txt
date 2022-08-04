@@ -27,4 +27,4 @@ IF(MSVC)
             PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/")
 ENDIF()
 
-TARGET_LINK_LIBRARIES(${TargetName} PUBLIC AGZUtils m_common assimp-vc143-mtd.lib)
+TARGET_LINK_LIBRARIES(${TargetName} PUBLIC AGZUtils m_common assimp::assimp)

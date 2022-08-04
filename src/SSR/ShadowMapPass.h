@@ -6,7 +6,7 @@
 #include <m_common/m_ExamplesVAO.h>
 #include <glm/gtc/random.hpp>
 
-class ShadowMapPass : public RenderPassV2
+class DepthMapsPass : public RenderPassV2
 {
 public:
     using RenderPassV2::RenderPassV2;
@@ -71,7 +71,7 @@ public:
 
     }
 
-    virtual ~ShadowMapPass()
+    virtual ~DepthMapsPass()
     {
     }
 

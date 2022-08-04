@@ -28,5 +28,5 @@ IF(MSVC)
 ENDIF()
 
 
-TARGET_LINK_LIBRARIES(${TargetName} PUBLIC AGZUtils m_common assimp-vc143-mtd.lib)
+TARGET_LINK_LIBRARIES(${TargetName} PUBLIC AGZUtils m_common assimp::assimp)
 TARGET_LINK_LIBRARIES(${TargetName} PUBLIC Threads::Threads)

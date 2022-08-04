@@ -7,6 +7,7 @@ SET(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 SET(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 find_package(Threads REQUIRED)
+find_package(assimp CONFIG REQUIRED)
 
 set(TBB_DIR "K:\\Dependency\\tbb\\cmake")
 find_package(TBB REQUIRED)
@@ -20,11 +21,10 @@ SET(AGZ_ENABLE_GL ON)
 #SET(AGZ_ENABLE_OPENGL ON)
 
 link_directories(${PROJECT_SOURCE_DIR}/lib)
+#link_directories("F:\\Dependency\\vcpkg\\installed\\x64-windows\\debug\\lib")
+
 # assimp
 include_directories(
-        ${PROJECT_SOURCE_DIR}/include/assimp/include
-        ${PROJECT_SOURCE_DIR}/include/assimp/cmake-build-debug/include
-
         ${PROJECT_SOURCE_DIR}/include/glm/
         ${PROJECT_SOURCE_DIR}/include/
         ${PROJECT_SOURCE_DIR}/include/spdlog/include/
@@ -33,6 +33,7 @@ include_directories(
 ADD_SUBDIRECTORY("K:/Dependency/agz-utils/" lib/)
 #TARGET_COMPILE_DEFINITIONS(AGZUtils PUBLIC AGZ_UTILS_SSE _UNICODE)
 #SET_TARGET_PROPERTIES(AGZUtils PROPERTIES FOLDER "ThirdParty")
+
 
 ADD_SUBDIRECTORY(src/m_common)
 

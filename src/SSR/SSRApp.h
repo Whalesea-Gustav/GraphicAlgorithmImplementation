@@ -60,7 +60,7 @@ private:
 
     float lightRadience = 15.0f;
 
-    ShadowMapPass shadowmap_pass;
+    DepthMapsPass shadowmap_pass;
     GBufferPass gbuffer_pass;
     GBufferPass gbuffer_pass_alternative;
     GBufferPass* p_gbuffer_pass;
