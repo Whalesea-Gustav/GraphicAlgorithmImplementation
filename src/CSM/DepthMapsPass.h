@@ -186,6 +186,7 @@ public:
 
         m_pShader->use();
         glBindFramebuffer(GL_FRAMEBUFFER, lightFBO);
+        glEnable(GL_DEPTH_TEST);
         glViewport(0, 0, resolution_width, resolution_height);
         glClear(GL_DEPTH_BUFFER_BIT);
         glCullFace(GL_FRONT);

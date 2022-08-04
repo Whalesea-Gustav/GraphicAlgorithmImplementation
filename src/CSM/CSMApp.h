@@ -10,6 +10,7 @@
 #include <m_common/m_ExamplesVAO.h>
 
 #include "DepthMapsPass.h"
+#include "MainRenderPass.h"
 
 //Todo:
 // 1. Generate ShadowMaps for Cascade Frustrum
@@ -59,32 +60,38 @@ private:
     DirectionalLight dirLight;
 
     DepthMapsPass depthmap_pass;
+    MainRenderPass main_render_pass;
 
+    unsigned int loadTexture(const char *path);
+
+    unsigned int woodTexture;
 };
 
 void CSMApp::initialize()
 {
-    m_camera.setPosition({ 0, 2, 3 });
-    m_camera.setDirection(-3.14159f * 0.5f, 0);
+    m_camera.setPosition({ 0, 0, 0 });
+    m_camera.setDirection(0.0f, 3.14159f * 0.5f);
     m_camera.setPerspective(60.0f, 0.1f, 500.0f);
+    m_camera.recalculateMatrics();
 
     this->mouse_->set_cursor_lock(true, this->window_->get_framebuffer_width() / 2.0, this->window_->get_framebuffer_height() / 2.0);
     this->mouse_->show_cursor(false);
     window_->do_events();
 
-
-    //light
-    this->m_lights.push_back(getLight());
-
-    auto pModel = std::make_shared<Model<VertexPosNormalTex>>("../../../asset/Sponza/sponza.obj");
-    int CSM_resolution = 4096;
+    int CSM_resolution = 10;
 
     depthmap_pass.setWH(CSM_resolution, CSM_resolution);
     depthmap_pass.setCameraZ(m_camera.getFarZ(), m_camera.getNearZ());
+    depthmap_pass.cameraZoom = m_camera.getFovDegree();
     depthmap_pass.cameraView = m_camera.getView();
     depthmap_pass.aspectRatio = float(window_->get_framebuffer_width()) / float(window_->get_framebuffer_height());
+    depthmap_pass.lightDir =  glm::normalize(glm::vec3(20.0f, 50, 20.0f));
     depthmap_pass.InitPass();
 
+    main_render_pass.setWH(window_->get_framebuffer_width(), window_->get_framebuffer_height());
+    main_render_pass.InitPass();
+
+    woodTexture = loadTexture("../../../asset/CSM/wood.png");
 }
 
 void CSMApp::frame()
@@ -102,11 +109,20 @@ void CSMApp::frame()
         mouse_->set_cursor_lock(!mouse_->is_cursor_locked(), mouse_->get_cursor_lock_x(), mouse_->get_cursor_lock_y());
     }
 
+    bool gui = ImGui::Begin("Settings", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+    if(gui)
+    {
+        ImGui::Text("PCF Checkbox");
+        ImGui::Checkbox("PCF ON", &main_render_pass.bUsePCF);
+    }
+
     //update camera
     updateCamera();
 
     //frameCSM();
     frameDebug();
+
+    ImGui::End();
 }
 
 void CSMApp::destroy()
@@ -158,89 +174,78 @@ Light CSMApp::getLight()
 
 void CSMApp::frameCSM()
 {
-    auto& light = m_lights[0];
-
-
-    // Light Pass
-    glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
-    fbo_ptr->Bind();
-
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-    glm::mat4 lightProjection = glm::ortho(-10.0f, 10.0f, -10.0f, 10.0f, m_camera.getNearZ(), m_camera.getFarZ());
-    glm::mat4 lightView = glm::lookAt(light.position, glm::vec3(0, 1, 0), glm::vec3(0, 1, 0));
-    glm::mat4 lightSpaceMatrix = lightProjection * lightView;
-
-    m_shaders[2].use();
-    m_shaders[2].setMat4("lightSpaceMatrix", lightSpaceMatrix);
-    m_shaders[2].setMat4("model", glm::identity<glm::mat4>());
-
-    m_models[0].Draw(m_shaders[2]);
-    m_models[1].Draw(m_shaders[2]);
-
-    fbo_ptr->UnBind();
-
-    // Compute Shader Pass : Generate SAT
-    m_shaders[4].use();
-    m_shaders[4].setInt("input_image", 0);
-    m_shaders[4].setInt("output_image", 1);
-    glBindImageTexture(0, fbo_ptr->GetTextureAttachment()[0], 0, GL_FALSE, 0, GL_READ_ONLY, GL_RG32F);
-    glBindImageTexture(1, m_textures[0].id, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RG32F);
-    glDispatchCompute(SHADOW_WIDTH, 1, 1);
-    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
-    glBindImageTexture(0, m_textures[0].id, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RG32F);
-    glBindImageTexture(1, m_textures[1].id, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RG32F);
-    glDispatchCompute(SHADOW_WIDTH, 1, 1);
-    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
-
-    // Object Pass
-    glViewport(0, 0, window_->get_framebuffer_width(), window_->get_framebuffer_height());
-
-    glEnable(GL_DEPTH_TEST);
-    glDepthFunc(GL_LESS);
-
-    glClearColor(0.05f, 0.05f, 0.05f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-    m_shaders[3].use();
-    auto model = glm::identity<glm::mat4>();
-    auto view = m_camera.getView();
-    auto projection = m_camera.getProj();
-
-    m_shaders[3].setMat4("model", model);
-    m_shaders[3].setMat4("view", view);
-    m_shaders[3].setMat4("projection", projection);
-    m_shaders[3].setMat4("lightSpaceMatrix", lightSpaceMatrix);
-
-    //Light Info
-    m_shaders[3].setVec3("light.position", light.position);
-    m_shaders[3].setVec3("light.ambient", light.ambient);
-    m_shaders[3].setVec3("light.diffuse", light.diffuse);
-    m_shaders[3].setVec3("light.specular", light.specular);
-    m_shaders[3].setFloat("light.constant", light.constant);
-    m_shaders[3].setFloat("light.linear", light.linear);
-    m_shaders[3].setFloat("light.quadratic", light.quadratic);
-    m_shaders[3].setFloat("shininess", 32.0f);
-    m_shaders[3].setVec3("viewPos", m_camera.getPosition());
-    m_shaders[3].setBool("blinn", true);
-
-    float light_size = 50.0f;
-    m_shaders[3].setFloat("u_LightSize", light_size);
-    m_shaders[3].setFloat("u_TextureSize", static_cast<float>(SHADOW_WIDTH));
-
-    m_shaders[3].setInt("shadowMap", 1);
-
-    glActiveTexture(GL_TEXTURE0+1);
-    glBindTexture(GL_TEXTURE_2D, m_textures[1].id);
-
-    //PCF sampling radius
-    m_shaders[3].setInt("sampleRadius", 10);
-
-    m_models[0].Draw(m_shaders[3]);
-    m_models[1].Draw(m_shaders[3]);
 }
 
 void CSMApp::frameDebug()
 {
+    auto model = glm::identity<glm::mat4>();
+    auto view = m_camera.getView();
+    auto projection = m_camera.getProj();
+
+    auto depthmap_pass_shader = depthmap_pass.GetShader();
+    depthmap_pass_shader->use();
+
     depthmap_pass.RenderPass();
+
+    auto main_render_pass_shader = main_render_pass.GetShader();
+    main_render_pass_shader->use();
+    main_render_pass_shader->setMat4("model", model);
+    main_render_pass_shader->setMat4("view", view);
+    main_render_pass_shader->setMat4("projection", projection);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, woodTexture);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, depthmap_pass.lightDepthMaps);
+
+    main_render_pass_shader->setInt("diffuseTexture", 0);
+    main_render_pass_shader->setInt("shadowMap", 1);
+
+    main_render_pass_shader->setVec3("lightDir", depthmap_pass.lightDir);
+    main_render_pass_shader->setVec3("viewPos", m_camera.getPosition());
+    main_render_pass_shader->setFloat("farPlane", depthmap_pass.zFar);
+    main_render_pass_shader->setInt("cascadeCount", depthmap_pass.shadowCascadeLevels.size());
+    for (int i = 0; i < depthmap_pass.shadowCascadeLevels.size(); ++i)
+    {
+        main_render_pass_shader->setFloat("cascadePlaneDistances[" + std::to_string(i) + "]", depthmap_pass.shadowCascadeLevels[i]);
+    }
+
+
+    main_render_pass.RenderPass();
+}
+
+unsigned int CSMApp::loadTexture(const char *path)
+{
+    unsigned int textureID;
+    glGenTextures(1, &textureID);
+
+    int width, height, nrComponents;
+    unsigned char *data = stbi_load(path, &width, &height, &nrComponents, 0);
+    if (data)
+    {
+        GLenum format;
+        if (nrComponents == 1)
+            format = GL_RED;
+        else if (nrComponents == 3)
+            format = GL_RGB;
+        else if (nrComponents == 4)
+            format = GL_RGBA;
+
+        glBindTexture(GL_TEXTURE_2D, textureID);
+        glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
+        glGenerateMipmap(GL_TEXTURE_2D);
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+        stbi_image_free(data);
+    }
+    else
+    {
+        std::cout << "Texture failed to load at path: " << path << std::endl;
+        stbi_image_free(data);
+    }
+
+    return textureID;
 }

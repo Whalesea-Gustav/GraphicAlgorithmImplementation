@@ -18,7 +18,7 @@ using namespace agz::gl;
 int main()
 {
     window_desc_t windowDesc {
-        .size = {1024, 1024},
+        .size = {2560 / 2, 1440 / 2},
         .title = "test viewer",
         .multisamples = 4
     };
