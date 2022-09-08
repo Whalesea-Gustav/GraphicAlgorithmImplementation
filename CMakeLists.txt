@@ -28,12 +28,14 @@ include_directories(
         ${PROJECT_SOURCE_DIR}/include/glm/
         ${PROJECT_SOURCE_DIR}/include/
         ${PROJECT_SOURCE_DIR}/include/spdlog/include/
+        ${PROJECT_SOURCE_DIR}/include/eigen-3.4.0/
+        ${PROJECT_SOURCE_DIR}/include/MarchingCubeLibrary/src
+        ${PROJECT_SOURCE_DIR}/include/TimeCount
 )
 
 ADD_SUBDIRECTORY("K:/Dependency/agz-utils/" lib/)
 #TARGET_COMPILE_DEFINITIONS(AGZUtils PUBLIC AGZ_UTILS_SSE _UNICODE)
 #SET_TARGET_PROPERTIES(AGZUtils PROPERTIES FOLDER "ThirdParty")
-
 
 ADD_SUBDIRECTORY(src/m_common)
 
@@ -56,3 +58,4 @@ ADD_SUBDIRECTORY(src/HBAO)
 ADD_SUBDIRECTORY(src/GTAO)
 ADD_SUBDIRECTORY(src/SSR)
 ADD_SUBDIRECTORY(src/CSM)
+ADD_SUBDIRECTORY(src/MarchingCube)
